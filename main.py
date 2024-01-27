@@ -1,93 +1,133 @@
-import JarvisAI
-import re
-import pprint
-import random
+import tkinter as tk
+from tkinter import ttk
+from tkinter import scrolledtext
+from PIL import Image, ImageTk
+from ultralytics import YOLO
+import cv2
+import cvzone
+import math
+import time
+import pyttsx3
 
-obj = JarvisAI.JarvisAssistant()
+# Initialize the text-to-speech engine
+engine = pyttsx3.init()
 
+class Application:
+    def __init__(self, window, window_title):
+        self.window = window
+        self.window.title(window_title)
 
-def t2s(text):
-    obj.text2speech(text)
+        self.cap = cv2.VideoCapture(0)  # For Webcam
+        self.cap.set(3, 1280)
+        self.cap.set(4, 720)
 
+        self.model = YOLO("./yolov8l.pt")
 
-while True:
-    res = obj.mic_input()
+        self.class_names = ["person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat",
+                            "traffic light", "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat",
+                            "dog", "horse", "sheep", "cow", "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella",
+                            "handbag", "tie", "suitcase", "frisbee", "skis", "snowboard", "sports ball", "kite", "baseball bat",
+                            "baseball glove", "skateboard", "surfboard", "tennis racket", "bottle", "wine glass", "cup",
+                            "fork", "knife", "spoon", "bowl", "banana", "apple", "sandwich", "orange", "broccoli",
+                            "carrot", "hot dog", "pizza", "donut", "cake", "chair", "sofa", "pottedplant", "bed",
+                            "diningtable", "toilet", "tvmonitor", "laptop", "mouse", "remote", "keyboard", "cell phone",
+                            "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+                            "teddy bear", "hair drier", "toothbrush"
+                            ]
 
-    if re.search('weather|temperature', res):
-        city = res.split(' ')[-1]
-        weather_res = obj.weather(city=city)
-        print(weather_res)
-        t2s(weather_res)
+        self.prev_frame_time = 0
+        self.new_frame_time = 0
 
-    if re.search('news', res):
-        news_res = obj.news()
-        pprint.pprint(news_res)
-        t2s(f"I have found {len(news_res)} news. You can read it. Let me tell you first 2 of them")
-        t2s(news_res[0])
-        t2s(news_res[1])
+        # Create GUI components
+        self.video_canvas = tk.Canvas(window, width=800, height=600)  # Increased width and height
+        self.video_canvas.grid(row=0, column=0, padx=10, pady=10)
 
-    if re.search('tell me about', res):
-        topic = res.split(' ')[-1]
-        wiki_res = obj.tell_me(topic)
-        print(wiki_res)
-        t2s(wiki_res)
+        self.log_text = scrolledtext.ScrolledText(window, width=40, height=10)
+        self.log_text.grid(row=0, column=1, padx=10, pady=10)
 
-    if re.search('date', res):
-        date = obj.tell_me_date()
-        print(date)
-        print(t2s(date))
+        self.start_button = ttk.Button(window, text="Start", command=self.start_detection)
+        self.start_button.grid(row=1, column=0, padx=10, pady=10)
 
-    if re.search('time', res):
-        time = obj.tell_me_time()
-        print(time)
-        t2s(time)
+        self.stop_button = ttk.Button(window, text="Stop", command=self.stop_detection)
+        self.stop_button.grid(row=1, column=1, padx=10, pady=10)
 
-    if re.search('open', res):
-        domain = res.split(' ')[-1]
-        open_result = obj.website_opener(domain)
-        print(open_result)
+        self.is_detecting = False
+        self.detect()
 
-    if re.search('launch', res):
-        dict_app = {
-            'chrome': 'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe',
-            'epic games': 'C:\Program Files (x86)\Epic Games\Launcher\Portal\Binaries\Win32\EpicGamesLauncher.exe'
-        }
+    def detect(self):
+        if self.is_detecting:
+            success, img = self.cap.read()
+            results = self.model(img, stream=True)
 
-        app = res.split(' ', 1)[1]
-        path = dict_app.get(app)
-        if path is None:
-            t2s('Application path not found')
-            print('Application path not found')
-        else:
-            t2s('Launching: ' + app)
-            obj.launch_any_app(path_of_app=path)
+            detected_elements = []  # List to store detected elements in the current frame
 
-    if re.search('hello', res):
-        print('Hi')
-        t2s('Hi')
+            for r in results:
+                boxes = r.boxes
+                for box in boxes:
+                    # Confidence
+                    conf = math.ceil((box.conf[0] * 100)) / 100
 
-    if re.search('how are you', res):
-        li = ['good', 'fine', 'great']
-        response = random.choice(li)
-        print(f"I am {response}")
-        t2s(f"I am {response}")
+                    # Draw bounding box only when confidence level is above 0.8
+                    if conf > 0.7:
+                        # Bounding Box
+                        x1, y1, x2, y2 = box.xyxy[0]
+                        x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
+                        w, h = x2 - x1, y2 - y1
+                        cvzone.cornerRect(img, (x1, y1, w, h))
 
-    if re.search('your name|who are you', res):
-        print("My name is Jarvis, I am your personal assistant")
-        t2s("My name is Jarvis, I am your personal assistant")
+                        # Class Name
+                        cls = int(box.cls[0])
+                        class_name = self.class_names[cls]
 
-    if re.search('what can you do', res):
-        li_commands = {
-            "open websites": "Example: 'open youtube.com",
-            "time": "Example: 'what time it is?'",
-            "date": "Example: 'what date it is?'",
-            "launch applications": "Example: 'launch chrome'",
-            "tell me": "Example: 'tell me about India'",
-            "weather": "Example: 'what weather/temperature in Mumbai?'",
-            "news": "Example: 'news for today' ",
-        }
-        ans = """I can do lots of things, for example you can ask me time, date, weather in your city,
-        I can open websites for you, launch application and more. See the list of commands-"""
-        print(ans)
-        pprint.pprint(li_commands)
-        t2s(ans)
+                        # Add detected element to the list
+                        detected_elements.append(f'{class_name} ')
+
+                        cvzone.putTextRect(img, f'{class_name} {conf}', (max(0, x1), max(35, y1)), scale=1, thickness=1)
+
+            fps = 1 / (time.time() - self.prev_frame_time)
+            self.prev_frame_time = time.time()
+
+            # Display the frame with bounding boxes
+            self.display_frame(img, fps, detected_elements)
+
+            # Speak the detected elements
+            if detected_elements:
+                text_to_speak = ", ".join(detected_elements)
+                engine.say(f'Detected: {text_to_speak}')
+                engine.runAndWait()
+
+            # Call detect function after 10 milliseconds
+            self.window.after(10, self.detect)
+
+    def display_frame(self, frame, fps, detected_elements):
+        frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = Image.fromarray(frame)
+        photo = ImageTk.PhotoImage(image=frame)
+
+        self.video_canvas.config(width=photo.width(), height=photo.height())
+        self.video_canvas.create_image(0, 0, anchor=tk.NW, image=photo)
+        self.video_canvas.update()
+
+        self.log_text.delete(1.0, tk.END)
+        # Display detected elements in log_text
+        if detected_elements:
+            text_to_display = ", ".join(detected_elements)
+            self.log_text.insert(tk.END, f'Detected Objects: {text_to_display}\n')
+        self.log_text.insert(tk.END, f'FPS: {fps:.2f}\n')
+
+    def start_detection(self):
+        self.is_detecting = True
+        self.detect()
+
+    def stop_detection(self):
+        self.is_detecting = False
+
+# Create a Tkinter window
+root = tk.Tk()
+root.title("Object Detection")  # Set the title of the window
+app = Application(root, "Object Detection App")
+root.mainloop()
+
+# Release the webcam and close the application
+app.cap.release()
+cv2.destroyAllWindows()
